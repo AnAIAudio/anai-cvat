@@ -11,7 +11,7 @@ NUCLIO["HOST"] = os.getenv("CVAT_NUCLIO_HOST", "nuclio")
 
 # Django-sendfile:
 # https://github.com/moggers87/django-sendfile2
-SENDFILE_BACKEND = "django_sendfile.backends.nginx"
+SENDFILE_BACKEND = os.environ.get("SENDFILE_BACKEND", "django_sendfile.backends.nginx")
 SENDFILE_URL = "/"
 
 LOGGING["formatters"]["verbose_uvicorn_access"] = {
