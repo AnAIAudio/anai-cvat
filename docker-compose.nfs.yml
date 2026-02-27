@@ -8,6 +8,11 @@ services:
     environment:
       CSRF_TRUSTED_ORIGINS: "https://cvat.catslandlady.net"
 
+  traefik:
+    environment:
+      # Trust X-Forwarded-* headers from external Nginx (SSL termination)
+      TRAEFIK_ENTRYPOINTS_web_FORWARDEDHEADERS_INSECURE: "true"
+
   cvat_ui:
     build:
       context: .
