@@ -1,0 +1,17 @@
+# NFS volume override for Docker Compose
+# Usage: docker compose -f docker-compose.yml -f docker-compose.nfs.yml up -d
+
+volumes:
+  cvat_data:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: "addr=211.233.64.121,rw,nolock,soft"
+      device: ":/data/nfs/share/anai-cvat/data"
+
+  cvat_logs:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: "addr=211.233.64.121,rw,nolock,soft"
+      device: ":/data/nfs/share/anai-cvat/logs"
