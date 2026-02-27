@@ -1,10 +1,17 @@
 # NFS volume override for Docker Compose
-# Usage: docker compose -f docker-compose.yml -f docker-compose.nfs.yml up -d
+# Usage: docker compose -f docker-compose.yml -f docker-compose.nfs.yml up --build -d
 
 services:
   cvat_server:
+    build:
+      context: .
     environment:
       CSRF_TRUSTED_ORIGINS: "https://cvat.catslandlady.net"
+
+  cvat_ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.ui
 
 volumes:
   cvat_data:
