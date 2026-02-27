@@ -7,7 +7,6 @@ services:
       context: .
     environment:
       CSRF_TRUSTED_ORIGINS: "https://cvat.catslandlady.net"
-      SENDFILE_BACKEND: "django_sendfile.backends.development"
 
   cvat_ui:
     build:
