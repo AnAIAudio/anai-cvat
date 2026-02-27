@@ -338,7 +338,9 @@ def sendfile(
     if attachment_filename:
         attachment_filename = make_attachment_file_name(attachment_filename)
 
-    return _sendfile(request, filename, attachment, attachment_filename, mimetype, encoding)
+    response = _sendfile(request, filename, attachment, attachment_filename, mimetype, encoding)
+    response["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return response
 
 
 def build_backup_file_name(
