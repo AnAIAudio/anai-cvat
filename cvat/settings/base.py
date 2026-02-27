@@ -37,6 +37,9 @@ ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1").split(","
 INTERNAL_IPS = ["127.0.0.1"]
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "")
 
+_csrf_origins = os.environ.get("CSRF_TRUSTED_ORIGINS", "")
+CSRF_TRUSTED_ORIGINS = [o.strip() for o in _csrf_origins.split(",") if o.strip()] if _csrf_origins else []
+
 
 def generate_secret_key():
     """
