@@ -1,0 +1,50 @@
+metadata:
+  name: onnx-ultralytics-yolo11-football
+  namespace: cvat
+  annotations:
+    name: YOLO 11 Football
+    type: detector
+    spec: |
+      [
+        { "id": 0, "name": "ball", "type": "rectangle" },
+        { "id": 1, "name": "goalkeeper", "type": "rectangle" },
+        { "id": 2, "name": "team1", "type": "rectangle" },
+        { "id": 3, "name": "referee", "type": "rectangle" }
+      ]
+
+spec:
+  description: YOLO 11 Football Detection (ball, goalkeeper, player, referee) via ONNX with GPU
+  runtime: 'python:3.10'
+  handler: main:handler
+  eventTimeout: 30s
+  build:
+    image: cvat.onnx.ultralytics.yolo11.football:latest-gpu
+    baseImage: nvidia/cuda:12.6.3-cudnn-runtime-ubuntu22.04
+
+    directives:
+      preCopy:
+        - kind: RUN
+          value: apt-get update && apt-get install --no-install-recommends -y python3-pip python-is-python3 && rm -rf /var/lib/apt/lists/*
+        - kind: RUN
+          value: pip install onnxruntime-gpu=='1.20.*' opencv-python-headless pillow pyyaml numpy --no-cache-dir
+        - kind: WORKDIR
+          value: /opt/nuclio
+
+  triggers:
+    myHttpTrigger:
+      numWorkers: 1
+      kind: 'http'
+      workerAvailabilityTimeoutMilliseconds: 10000
+      attributes:
+        maxRequestBodySize: 33554432 # 32MB
+
+  resources:
+    limits:
+      nvidia.com/gpu: 1
+
+  platform:
+    attributes:
+      restartPolicy:
+        name: always
+        maximumRetryCount: 3
+      mountMode: volume
