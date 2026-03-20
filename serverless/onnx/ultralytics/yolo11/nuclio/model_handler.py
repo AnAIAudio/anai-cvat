@@ -1,14 +1,16 @@
 import cv2
 import numpy as np
 import onnxruntime as ort
+from player_classifier import PlayerClassifier
 
 
 class ModelHandler:
-    def __init__(self, labels):
+    def __init__(self, labels, onnx_model_path, kmeans_model_path, cluster_label_map):
         self.labels = labels
         self.model = None
         self.input_size = 640
-        self.load_network(model="/opt/nuclio/best1010_2.onnx")
+        self.player_classifier = PlayerClassifier(kmeans_model_path, cluster_label_map)
+        self.load_network(model=onnx_model_path)
 
     def load_network(self, model):
         device = ort.get_device()
@@ -63,14 +65,14 @@ class ModelHandler:
 
         # Run inference
         inp = {self.input_details[0]: img_lb}
-        output = self.model.run(self.output_details, inp)[0]  # (1, 8, 8400)
+        output = self.model.run(self.output_details, inp)[0]  # (1, 6, 8400)
 
         # Postprocess: YOLOv8/11 output format is (1, 4+num_classes, num_boxes)
         # Transpose to (num_boxes, 4+num_classes)
-        output = output[0].T  # (8400, 8)
+        output = output[0].T  # (8400, 6)
 
         boxes = output[:, :4]      # cx, cy, w, h
-        scores = output[:, 4:]     # class scores (4 classes)
+        scores = output[:, 4:]     # class scores (2 classes: ball, player)
 
         # Get best class per box
         class_ids = np.argmax(scores, axis=1)
@@ -105,15 +107,23 @@ class ModelHandler:
         results = []
         if len(indices) > 0:
             for i in indices.flatten():
+                raw_label = self.labels.get(int(class_ids[i]), "unknown")
+                bbox = (
+                    max(int(x1[i]), 0),
+                    max(int(y1[i]), 0),
+                    min(int(x2[i]), w),
+                    min(int(y2[i]), h),
+                )
+
+                if raw_label == "player":
+                    label = self.player_classifier.classify(img_bgr, bbox)
+                else:
+                    label = raw_label
+
                 results.append({
                     "confidence": str(float(confidences[i])),
-                    "label": self.labels.get(int(class_ids[i]), "unknown"),
-                    "points": [
-                        max(int(x1[i]), 0),
-                        max(int(y1[i]), 0),
-                        min(int(x2[i]), w),
-                        min(int(y2[i]), h),
-                    ],
+                    "label": label,
+                    "points": list(bbox),
                     "type": "rectangle",
                 })
 

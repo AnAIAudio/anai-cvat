@@ -7,10 +7,15 @@ metadata:
     spec: |
       [
         { "id": 0, "name": "ball", "type": "rectangle" },
-        { "id": 1, "name": "goalkeeper", "type": "rectangle" },
-        { "id": 2, "name": "team1", "type": "rectangle" },
-        { "id": 3, "name": "referee", "type": "rectangle" }
+        { "id": 1, "name": "team1", "type": "rectangle" },
+        { "id": 2, "name": "team2", "type": "rectangle" },
+        { "id": 3, "name": "goalkeeper", "type": "rectangle" },
+        { "id": 4, "name": "referee", "type": "rectangle" }
       ]
+    yolo_labels: '{"0": "ball", "1": "player"}'
+    cluster_label_map: '{"0": "team1", "1": "team2", "2": "goalkeeper", "3": "referee"}'
+    onnx_model: "best_new.onnx"
+    kmeans_model: "player_kmeans.joblib"
 
 spec:
   description: YOLO 11 Football Detection (ball, goalkeeper, player, referee) via ONNX with GPU
@@ -26,7 +31,7 @@ spec:
         - kind: RUN
           value: apt-get update && apt-get install --no-install-recommends -y python3-pip python-is-python3 && rm -rf /var/lib/apt/lists/*
         - kind: RUN
-          value: pip install onnxruntime-gpu=='1.20.*' opencv-python-headless pillow pyyaml numpy --no-cache-dir
+          value: pip install onnxruntime-gpu=='1.20.*' opencv-python-headless pillow pyyaml numpy scikit-learn joblib --no-cache-dir
         - kind: WORKDIR
           value: /opt/nuclio
 

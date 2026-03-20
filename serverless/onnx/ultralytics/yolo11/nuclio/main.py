@@ -13,10 +13,20 @@ def init_context(context):
     with open("/opt/nuclio/function.yaml", "rb") as function_file:
         functionconfig = yaml.safe_load(function_file)
 
-    labels_spec = functionconfig["metadata"]["annotations"]["spec"]
+    annotations = functionconfig["metadata"]["annotations"]
+    labels_spec = annotations["spec"]
     labels = {item["id"]: item["name"] for item in json.loads(labels_spec)}
 
-    model = ModelHandler(labels)
+    yolo_labels_str = annotations.get("yolo_labels", "{}")
+    yolo_labels = {int(k): v for k, v in json.loads(yolo_labels_str).items()}
+
+    cluster_label_map_str = annotations.get("cluster_label_map", "{}")
+    cluster_label_map = {int(k): v for k, v in json.loads(cluster_label_map_str).items()}
+
+    kmeans_model_path = "/opt/nuclio/" + annotations.get("kmeans_model", "player_kmeans.joblib")
+    onnx_model_path = "/opt/nuclio/" + annotations.get("onnx_model", "best_new.onnx")
+
+    model = ModelHandler(yolo_labels, onnx_model_path, kmeans_model_path, cluster_label_map)
     context.user_data.model = model
 
     context.logger.info("Init context...100%")
