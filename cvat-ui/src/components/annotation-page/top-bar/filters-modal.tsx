@@ -161,6 +161,17 @@ function FiltersModalComponent(): JSX.Element {
                     hideForCompare: true,
                     fieldSettings: { min: 0 },
                 },
+                source: {
+                    label: 'Source',
+                    type: 'select',
+                    fieldSettings: {
+                        listValues: [
+                            { value: 'auto', title: 'Auto' },
+                            { value: 'semi-auto', title: 'Semi-auto' },
+                            { value: 'manual', title: 'Manual' },
+                        ],
+                    },
+                },
                 score: {
                     label: 'Score',
                     type: 'number',

@@ -5,7 +5,7 @@
 
 import jsonLogic from 'json-logic-js';
 import { SerializedData } from './object-state';
-import { AttributeType, ObjectType, ShapeType } from './enums';
+import { AttributeType, ObjectType, ShapeType, Source } from './enums';
 import { SerializedCollection } from './server-response-types';
 import { Attribute, Label } from './labels';
 
@@ -81,6 +81,7 @@ interface ConvertedObjectData {
     type: ObjectType;
     shape: ShapeType;
     occluded: boolean;
+    source: Source | null;
     score: number | null;
     votes: number | null;
 }
@@ -127,6 +128,7 @@ export default class AnnotationsFilter {
                 type: state.objectType,
                 shape: state.shapeType,
                 occluded: state.occluded,
+                source: state.source ?? null,
                 score: state.score ?? null,
                 votes: state.votes ?? null,
             };
@@ -183,6 +185,7 @@ export default class AnnotationsFilter {
                     shape: shape.type,
                     occluded: shape.occluded,
                     objectID: shape.clientID ?? null,
+                    source: shape.source ?? null,
                     score: shape.score ?? null,
                     votes: null,
                 };
@@ -203,6 +206,7 @@ export default class AnnotationsFilter {
                     shape: null,
                     occluded: false,
                     objectID: tag.clientID ?? null,
+                    source: tag.source ?? null,
                     score: null,
                     votes: null,
                 };
@@ -223,6 +227,7 @@ export default class AnnotationsFilter {
                     shape: track.shapes[0]?.type ?? null,
                     occluded: null,
                     objectID: track.clientID ?? null,
+                    source: track.source ?? null,
                     score: null,
                     votes: null,
                 };
