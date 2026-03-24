@@ -7,13 +7,13 @@ metadata:
     spec: |
       [
         { "id": 0, "name": "ball", "type": "rectangle" },
-        { "id": 1, "name": "team1", "type": "rectangle" },
-        { "id": 2, "name": "team2", "type": "rectangle" },
-        { "id": 3, "name": "goalkeeper", "type": "rectangle" },
-        { "id": 4, "name": "referee", "type": "rectangle" }
+        { "id": 1, "name": "blue", "type": "rectangle" },
+        { "id": 2, "name": "white", "type": "rectangle" },
+        { "id": 3, "name": "yellow", "type": "rectangle" },
+        { "id": 4, "name": "red", "type": "rectangle" }
       ]
     yolo_labels: '{"0": "ball", "1": "player"}'
-    cluster_label_map: '{"0": "team1", "1": "team2", "2": "goalkeeper", "3": "referee"}'
+    cluster_label_map: '{"0": "blue", "1": "white", "2": "yellow", "3": "red"}'
     onnx_model: "best_new.onnx"
     kmeans_model: "player_kmeans.joblib"
 
