@@ -24,7 +24,9 @@ from django.contrib.auth.models import User
 from django.core.files.storage import storages
 from django.db import IntegrityError, transaction
 from django.db.models.query import Prefetch
-from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseNotFound
+from django.http import (
+    FileResponse, HttpResponse, HttpResponseBadRequest, HttpResponseNotFound,
+)
 from django.utils import timezone
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import (
@@ -529,7 +531,7 @@ class _DataGetter(metaclass=ABCMeta):
     def __init__(
         self, data_type: str, data_num: str | int | None, data_quality: str
     ) -> None:
-        possible_data_type_values = ('chunk', 'frame', 'preview', 'context_image')
+        possible_data_type_values = ('chunk', 'frame', 'preview', 'context_image', 'video')
         possible_quality_values = ('compressed', 'original')
 
         if not data_type or data_type not in possible_data_type_values:
@@ -548,7 +550,34 @@ class _DataGetter(metaclass=ABCMeta):
     @abstractmethod
     def _get_frame_provider(self) -> IFrameProvider: ...
 
-    def __call__(self):
+    @abstractmethod
+    def _get_db_data(self) -> models.Data: ...
+
+    def _stream_video(self, request=None):
+        """Stream the original video file with Range request support."""
+        db_data = self._get_db_data()
+        if not hasattr(db_data, 'video'):
+            return Response(
+                data='This task does not contain video data',
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        video_path = db_data.get_raw_data_dirname() / db_data.video.path
+        if not video_path.is_file():
+            return HttpResponseNotFound('Video file not found')
+
+        response = FileResponse(
+            open(video_path, 'rb'),
+            content_type='video/mp4',
+        )
+        response['Accept-Ranges'] = 'bytes'
+        response['Content-Disposition'] = f'inline; filename="{video_path.name}"'
+        return response
+
+    def __call__(self, request=None):
+        if self.type == 'video':
+            return self._stream_video(request)
+
         frame_provider = self._get_frame_provider()
 
         try:
@@ -628,6 +657,9 @@ class _TaskDataGetter(_DataGetter):
     def _get_frame_provider(self) -> TaskFrameProvider:
         return TaskFrameProvider(self._db_task)
 
+    def _get_db_data(self) -> models.Data:
+        return self._db_task.data
+
     def _get_chunk_response_headers(self, chunk_data: DataWithMeta) -> dict[str, str]:
         return self._make_chunk_response_headers(
             self._get_chunk_checksum(chunk_data), self._db_task.get_chunks_updated_date(),
@@ -644,7 +676,7 @@ class _JobDataGetter(_DataGetter):
         data_num: str | int | None = None,
         data_index: str | int | None = None,
     ) -> None:
-        possible_data_type_values = ('chunk', 'frame', 'preview', 'context_image')
+        possible_data_type_values = ('chunk', 'frame', 'preview', 'context_image', 'video')
         possible_quality_values = ('compressed', 'original')
 
         if not data_type or data_type not in possible_data_type_values:
@@ -673,8 +705,13 @@ class _JobDataGetter(_DataGetter):
     def _get_frame_provider(self) -> JobFrameProvider:
         return JobFrameProvider(self._db_job)
 
-    def __call__(self):
-        if self.type == 'chunk':
+    def _get_db_data(self) -> models.Data:
+        return self._db_job.segment.task.data
+
+    def __call__(self, request=None):
+        if self.type == 'video':
+            return self._stream_video(request)
+        elif self.type == 'chunk':
             # Reproduce the task chunk indexing
             frame_provider = self._get_frame_provider()
 
@@ -1285,7 +1322,7 @@ class TaskViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
             data_getter = _TaskDataGetter(
                 self._object, data_type=data_type, data_num=data_num, data_quality=data_quality
             )
-            return data_getter()
+            return data_getter(request=request)
 
     @tus_chunk_action(detail=True, suffix_base="data")
     def append_data_chunk(self, request: ExtendedRequest, pk: int, file_id: str):
@@ -1930,7 +1967,7 @@ class JobViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.CreateMo
             data_type=data_type, data_quality=data_quality,
             data_index=data_index, data_num=data_num
         )
-        return data_getter()
+        return data_getter(request=request)
 
 
     @extend_schema(methods=['GET'], summary='Get metainformation for media files in a job',

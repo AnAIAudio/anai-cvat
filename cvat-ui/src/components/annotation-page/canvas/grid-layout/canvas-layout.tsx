@@ -17,6 +17,7 @@ import {
     FullscreenExitOutlined,
     FullscreenOutlined,
     PicCenterOutlined,
+    PlayCircleOutlined,
     PlusOutlined,
     ReloadOutlined,
 } from '@ant-design/icons';
@@ -33,6 +34,7 @@ import CanvasWrapper3DComponent, {
     FrontViewComponent,
 } from 'components/annotation-page/canvas/views/canvas3d/canvas-wrapper3D';
 import ContextImage from 'components/annotation-page/canvas/views/context-image/context-image';
+import VideoPlayer from 'components/annotation-page/canvas/views/video-player/video-player';
 import CVATTooltip from 'components/common/cvat-tooltip';
 import { useUpdateEffect } from 'utils/hooks';
 import defaultLayout, { ItemLayout, ViewType } from './canvas-layout.conf';
@@ -61,6 +63,9 @@ const ViewFabric = (itemLayout: ItemLayout): JSX.Element => {
             break;
         case ViewType.CANVAS_3D_TOP:
             component = <TopViewComponent />;
+            break;
+        case ViewType.VIDEO_PLAYER:
+            component = <VideoPlayer />;
             break;
         default:
             component = <div> Undefined view </div>;
@@ -147,10 +152,12 @@ function CanvasLayout({ type }: { type?: DimensionType }): JSX.Element {
         relatedFiles,
         canvasInstance,
         canvasBackgroundColor,
+        isVideoTask,
     } = useSelector((state: CombinedState) => ({
         relatedFiles: state.annotation.player.frame.relatedFiles,
         canvasInstance: state.annotation.canvas.instance,
         canvasBackgroundColor: state.settings.player.canvasBackgroundColor,
+        isVideoTask: state.annotation.job.instance?.mode === 'interpolation',
     }), shallowEqual);
 
     const computeRowHeight = (): number => {
@@ -316,6 +323,39 @@ function CanvasLayout({ type }: { type?: DimensionType }): JSX.Element {
                         }}
                     />
                 </CVATTooltip>
+                { isVideoTask && (
+                    <CVATTooltip title='Toggle video player'>
+                        <PlayCircleOutlined
+                            onClick={() => {
+                                const hasVideoPlayer = layoutConfig.some(
+                                    (item: ItemLayout) => item.viewType === ViewType.VIDEO_PLAYER,
+                                );
+                                if (hasVideoPlayer) {
+                                    setLayoutConfig(
+                                        layoutConfig.filter(
+                                            (item: ItemLayout) => item.viewType !== ViewType.VIDEO_PLAYER,
+                                        ),
+                                    );
+                                } else {
+                                    const videoItem: ItemLayout = {
+                                        viewType: ViewType.VIDEO_PLAYER,
+                                        offset: [0],
+                                        x: 0,
+                                        y: 0,
+                                        w: config.CANVAS_WORKSPACE_COLS,
+                                        h: config.CANVAS_WORKSPACE_ROWS,
+                                    };
+                                    // Replace canvas with video player
+                                    const withoutCanvas = layoutConfig.filter(
+                                        (item: ItemLayout) => item.viewType !== ViewType.CANVAS,
+                                    );
+                                    setLayoutConfig([videoItem, ...withoutCanvas]);
+                                }
+                                window.dispatchEvent(new Event('resize'));
+                            }}
+                        />
+                    </CVATTooltip>
+                )}
                 <CVATTooltip title='Add context image'>
                     <PlusOutlined
                         style={{
