@@ -64,7 +64,7 @@ def _interpolate_bbox(keyframes, frame_number):
     return keyframes[-1]
 
 
-def _crop_video_by_bbox(video_path, keyframes, output_path, vid_w, vid_h, fps):
+def _crop_video_by_bbox(video_path, keyframes, output_path, vid_w, vid_h, fps, errors=None):
     """Crop video spatially (bbox) and temporally using PyAV."""
     keyframes = sorted(keyframes, key=lambda s: s['frame'])
 
@@ -86,11 +86,10 @@ def _crop_video_by_bbox(video_path, keyframes, output_path, vid_w, vid_h, fps):
         output_container = av.open(str(output_path), mode='w')
 
         in_stream = input_container.streams.video[0]
-        out_stream = output_container.add_stream('h264', rate=fps)
+        out_stream = output_container.add_stream('libopenh264', rate=fps)
         out_stream.width = out_w
         out_stream.height = out_h
         out_stream.pix_fmt = 'yuv420p'
-        out_stream.options = {'preset': 'fast', 'crf': '23', 'movflags': '+faststart'}
 
         frame_count = 0
         for frame in input_container.decode(video=0):
@@ -141,8 +140,11 @@ def _crop_video_by_bbox(video_path, keyframes, output_path, vid_w, vid_h, fps):
         input_container.close()
         return True
 
-    except Exception:
+    except Exception as e:
+        import traceback
         logger.exception('Failed to crop video')
+        if errors is not None:
+            errors.append({'crop_error': str(e), 'traceback': traceback.format_exc()})
         return False
 
 
@@ -246,6 +248,7 @@ def _export_video_crop(dst_file, temp_dir, instance_data, **options):
 
             success = _crop_video_by_bbox(
                 video_path, keyframes, output_path, vid_w, vid_h, fps,
+                errors=debug_info['errors'],
             )
 
             if success and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
