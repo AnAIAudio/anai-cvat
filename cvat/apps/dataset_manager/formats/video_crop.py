@@ -90,8 +90,7 @@ def _crop_video_by_bbox(video_path, keyframes, output_path, vid_w, vid_h, fps, e
         output_container = av.open(str(output_path), mode='w')
 
         in_stream = input_container.streams.video[0]
-        from fractions import Fraction
-        out_stream = output_container.add_stream('libopenh264', rate=Fraction(fps).limit_denominator(10000))
+        out_stream = output_container.add_stream('libopenh264', rate=int(round(float(fps))))
         out_stream.width = out_w
         out_stream.height = out_h
         out_stream.pix_fmt = 'yuv420p'
