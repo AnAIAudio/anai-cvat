@@ -23,12 +23,16 @@ logger = logging.getLogger(__name__)
 
 
 def _get_video_info(video_path):
-    """Get video width, height, fps, and total frames using PyAV."""
+    """Get video width, height, fps (as Fraction), and total frames using PyAV."""
+    from fractions import Fraction
     with av.open(str(video_path)) as container:
         stream = container.streams.video[0]
         width = stream.codec_context.width
         height = stream.codec_context.height
-        fps = float(stream.average_rate) if stream.average_rate else 30.0
+        if stream.average_rate:
+            fps = Fraction(stream.average_rate.numerator, stream.average_rate.denominator)
+        else:
+            fps = Fraction(30)
         total_frames = stream.frames or 0
         return width, height, fps, total_frames
 
@@ -86,7 +90,8 @@ def _crop_video_by_bbox(video_path, keyframes, output_path, vid_w, vid_h, fps, e
         output_container = av.open(str(output_path), mode='w')
 
         in_stream = input_container.streams.video[0]
-        out_stream = output_container.add_stream('libopenh264', rate=fps)
+        from fractions import Fraction
+        out_stream = output_container.add_stream('libopenh264', rate=Fraction(fps).limit_denominator(10000))
         out_stream.width = out_w
         out_stream.height = out_h
         out_stream.pix_fmt = 'yuv420p'
