@@ -178,63 +178,108 @@ def _convert_track_to_keyframes(track, vid_w, vid_h, fps):
 
 
 def _export_video_crop(dst_file, temp_dir, instance_data, **options):
-    db_data = instance_data._db_data
-
-    if not hasattr(db_data, 'video'):
-        logger.warning('Video crop export: task does not contain video data')
-        make_zip_archive(temp_dir, dst_file)
-        return
-
-    video_path = db_data.get_raw_data_dirname() / db_data.video.path
-    if not video_path.is_file():
-        logger.warning('Video crop export: video file not found: %s', video_path)
-        make_zip_archive(temp_dir, dst_file)
-        return
+    debug_info = {'steps': [], 'errors': []}
 
     try:
-        vid_w, vid_h, fps, _ = _get_video_info(video_path)
+        db_data = instance_data._db_data
+        debug_info['steps'].append('got db_data')
+        debug_info['db_data_type'] = type(db_data).__name__
+        debug_info['has_video'] = hasattr(db_data, 'video')
+
+        if not hasattr(db_data, 'video'):
+            debug_info['errors'].append('task does not contain video data')
+            _write_debug_and_zip(temp_dir, dst_file, debug_info)
+            return
+
+        video_path = db_data.get_raw_data_dirname() / db_data.video.path
+        debug_info['video_path'] = str(video_path)
+        debug_info['video_exists'] = video_path.is_file()
+
+        if not video_path.is_file():
+            debug_info['errors'].append(f'video file not found: {video_path}')
+            _write_debug_and_zip(temp_dir, dst_file, debug_info)
+            return
+
+        vid_w, vid_h, fps, total = _get_video_info(video_path)
+        debug_info['video_info'] = {
+            'width': vid_w, 'height': vid_h, 'fps': fps, 'total_frames': total,
+        }
+
+        # Collect tracks
+        tracks_info = []
+        all_tracks = list(instance_data.tracks)
+        debug_info['track_count'] = len(all_tracks)
+
+        for track in all_tracks:
+            track_debug = {
+                'label': track.label,
+                'shape_count': len(track.shapes),
+                'id': track.id,
+            }
+            if track.shapes:
+                s = track.shapes[0]
+                track_debug['first_shape'] = {
+                    'type': s.type,
+                    'frame': s.frame,
+                    'points': list(s.points[:8]),
+                    'outside': s.outside,
+                }
+            tracks_info.append(track_debug)
+        debug_info['tracks'] = tracks_info
+
+        exported_count = 0
+        labels_data = []
+
+        for track in all_tracks:
+            label_str = track.label or 'unlabeled'
+
+            keyframes = _convert_track_to_keyframes(track, vid_w, vid_h, fps)
+            if not keyframes:
+                continue
+
+            label_dir = os.path.join(temp_dir, label_str)
+            os.makedirs(label_dir, exist_ok=True)
+
+            track_id = track.id if track.id is not None else exported_count
+            output_filename = f'track_{track_id}.mp4'
+            output_path = os.path.join(label_dir, output_filename)
+
+            success = _crop_video_by_bbox(
+                video_path, keyframes, output_path, vid_w, vid_h, fps,
+            )
+
+            if success and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                exported_count += 1
+                labels_data.append({
+                    'track_id': track_id,
+                    'label': label_str,
+                    'video': f'{label_str}/{output_filename}',
+                    'keyframes': len(keyframes),
+                    'time_start': min(kf['time'] for kf in keyframes),
+                    'time_end': max(kf['time'] for kf in keyframes),
+                })
+
+        debug_info['exported_count'] = exported_count
+        with open(os.path.join(temp_dir, 'labels.json'), 'w', encoding='utf-8') as f:
+            json.dump(labels_data, f, ensure_ascii=False, indent=2)
+
     except Exception as e:
-        logger.warning('Video crop export: failed to probe video: %s', e)
-        make_zip_archive(temp_dir, dst_file)
-        return
+        import traceback
+        debug_info['errors'].append(str(e))
+        debug_info['traceback'] = traceback.format_exc()
 
-    exported_count = 0
-    labels_data = []
+    # Always write debug info so we can diagnose issues
+    with open(os.path.join(temp_dir, 'debug.json'), 'w', encoding='utf-8') as f:
+        json.dump(debug_info, f, ensure_ascii=False, indent=2)
 
-    for track in instance_data.tracks:
-        label_str = track.label or 'unlabeled'
+    make_zip_archive(temp_dir, dst_file)
 
-        keyframes = _convert_track_to_keyframes(track, vid_w, vid_h, fps)
-        if not keyframes:
-            continue
 
-        label_dir = os.path.join(temp_dir, label_str)
-        os.makedirs(label_dir, exist_ok=True)
-
-        track_id = track.id if track.id is not None else exported_count
-        output_filename = f'track_{track_id}.mp4'
-        output_path = os.path.join(label_dir, output_filename)
-
-        logger.info('Cropping video for track %s, label=%s', track_id, label_str)
-        success = _crop_video_by_bbox(video_path, keyframes, output_path, vid_w, vid_h, fps)
-
-        if success and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-            exported_count += 1
-            labels_data.append({
-                'track_id': track_id,
-                'label': label_str,
-                'video': f'{label_str}/{output_filename}',
-                'keyframes': len(keyframes),
-                'time_start': min(kf['time'] for kf in keyframes),
-                'time_end': max(kf['time'] for kf in keyframes),
-            })
-        else:
-            logger.warning('Failed to crop video for track %s', track_id)
-
+def _write_debug_and_zip(temp_dir, dst_file, debug_info):
     with open(os.path.join(temp_dir, 'labels.json'), 'w', encoding='utf-8') as f:
-        json.dump(labels_data, f, ensure_ascii=False, indent=2)
-
-    logger.info('Video crop export complete: %s clips exported', exported_count)
+        json.dump([], f)
+    with open(os.path.join(temp_dir, 'debug.json'), 'w', encoding='utf-8') as f:
+        json.dump(debug_info, f, ensure_ascii=False, indent=2)
     make_zip_archive(temp_dir, dst_file)
 
 
