@@ -2,11 +2,18 @@
 #
 # SPDX-License-Identifier: MIT
 
-"""Video crop export: extract labeled regions from videos as cropped clips, organized by label."""
+"""Video crop export: extract labeled regions from videos as cropped clips, organized by label.
 
+Uses PyAV (libav) instead of ffmpeg CLI since CVAT containers don't include
+ffmpeg/ffprobe binaries (only the shared libraries for PyAV).
+"""
+
+import json
 import logging
 import os
-import subprocess
+
+import av
+import numpy as np
 
 from cvat.apps.dataset_manager.util import make_zip_archive
 
@@ -16,127 +23,127 @@ logger = logging.getLogger(__name__)
 
 
 def _get_video_info(video_path):
-    """Get video width, height, and fps using ffprobe."""
-    result = subprocess.run(
-        [
-            'ffprobe', '-v', 'quiet',
-            '-show_entries', 'stream=width,height,r_frame_rate,nb_frames',
-            '-of', 'csv=p=0',
-            str(video_path),
-        ],
-        capture_output=True, text=True,
-    )
-    parts = result.stdout.strip().split(',')
-    if len(parts) < 3:
-        raise ValueError(f'Failed to probe video: {video_path}')
-    width, height = int(parts[0]), int(parts[1])
-    fps_num, fps_den = map(int, parts[2].split('/'))
-    fps = fps_num / fps_den
-    return width, height, fps
+    """Get video width, height, fps, and total frames using PyAV."""
+    with av.open(str(video_path)) as container:
+        stream = container.streams.video[0]
+        width = stream.codec_context.width
+        height = stream.codec_context.height
+        fps = float(stream.average_rate) if stream.average_rate else 30.0
+        total_frames = stream.frames or 0
+        return width, height, fps, total_frames
 
 
-def _build_crop_expression(keyframes, vid_w, vid_h, coord):
-    """Build ffmpeg expression for dynamic crop position using keyframes with linear interpolation."""
-    scale = vid_w if coord == 'x' else vid_h
-    parts = []
+def _interpolate_bbox(keyframes, frame_number):
+    """Linearly interpolate bbox at a given frame number between keyframes."""
+    if not keyframes:
+        return None
 
+    # Before first keyframe
+    if frame_number <= keyframes[0]['frame']:
+        return keyframes[0]
+    # After last keyframe
+    if frame_number >= keyframes[-1]['frame']:
+        return keyframes[-1]
+
+    # Find surrounding keyframes
     for i in range(len(keyframes) - 1):
         kf_a = keyframes[i]
         kf_b = keyframes[i + 1]
-        fa = kf_a['frame']
-        fb = kf_b['frame']
-        va = kf_a[coord] / 100 * scale
-        vb = kf_b[coord] / 100 * scale
+        if kf_a['frame'] <= frame_number <= kf_b['frame']:
+            if kf_a['frame'] == kf_b['frame']:
+                return kf_a
+            t = (frame_number - kf_a['frame']) / (kf_b['frame'] - kf_a['frame'])
+            return {
+                'frame': frame_number,
+                'x': kf_a['x'] + t * (kf_b['x'] - kf_a['x']),
+                'y': kf_a['y'] + t * (kf_b['y'] - kf_a['y']),
+                'width': kf_a['width'] + t * (kf_b['width'] - kf_a['width']),
+                'height': kf_a['height'] + t * (kf_b['height'] - kf_a['height']),
+            }
 
-        if fa == fb:
-            continue
-
-        slope = (vb - va) / (fb - fa)
-        parts.append(f'between(n\\,{fa}\\,{fb})*({va:.1f}+{slope:.4f}*(n-{fa}))')
-
-    last_val = keyframes[-1][coord] / 100 * scale
-    first_frame = keyframes[0]['frame']
-    last_frame = keyframes[-1]['frame']
-    fallback = (
-        f'lt(n\\,{first_frame})*{keyframes[0][coord] / 100 * scale:.1f}'
-        f'+gt(n\\,{last_frame})*{last_val:.1f}'
-    )
-
-    expr = '+'.join(parts) + '+' + fallback
-    return expr
+    return keyframes[-1]
 
 
 def _crop_video_by_bbox(video_path, keyframes, output_path, vid_w, vid_h, fps):
-    """Crop video spatially (bbox) and temporally (label time range) using ffmpeg."""
+    """Crop video spatially (bbox) and temporally using PyAV."""
     keyframes = sorted(keyframes, key=lambda s: s['frame'])
 
-    t_start = keyframes[0]['time']
-    t_end = keyframes[-1]['time']
+    start_frame = keyframes[0]['frame']
+    end_frame = keyframes[-1]['frame']
 
+    # Output size from first keyframe bbox
     out_w = int(keyframes[0]['width'] / 100 * vid_w)
     out_h = int(keyframes[0]['height'] / 100 * vid_h)
-    out_w += out_w % 2
+    out_w += out_w % 2  # ensure even for h264
     out_h += out_h % 2
 
-    if len(keyframes) == 1:
-        kf = keyframes[0]
-        px = max(0, min(int(kf['x'] / 100 * vid_w), vid_w - out_w))
-        py = max(0, min(int(kf['y'] / 100 * vid_h), vid_h - out_h))
-        cmd = [
-            'ffmpeg', '-y',
-            '-ss', f'{t_start:.4f}',
-            '-i', str(video_path),
-            '-frames:v', '1',
-            '-vf', f'crop={out_w}:{out_h}:{px}:{py}',
-            '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
-            '-movflags', '+faststart',
-            '-an',
-            str(output_path),
-        ]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        return proc.returncode == 0
+    if out_w <= 0 or out_h <= 0:
+        logger.warning('Invalid crop dimensions: %dx%d', out_w, out_h)
+        return False
 
-    x_expr = _build_crop_expression(keyframes, vid_w, vid_h, 'x')
-    y_expr = _build_crop_expression(keyframes, vid_w, vid_h, 'y')
+    try:
+        input_container = av.open(str(video_path))
+        output_container = av.open(str(output_path), mode='w')
 
-    crop_filter = f'crop={out_w}:{out_h}:{x_expr}:{y_expr}'
+        in_stream = input_container.streams.video[0]
+        out_stream = output_container.add_stream('h264', rate=fps)
+        out_stream.width = out_w
+        out_stream.height = out_h
+        out_stream.pix_fmt = 'yuv420p'
+        out_stream.options = {'preset': 'fast', 'crf': '23', 'movflags': '+faststart'}
 
-    cmd = [
-        'ffmpeg', '-y',
-        '-ss', f'{t_start:.4f}',
-        '-to', f'{t_end:.4f}',
-        '-i', str(video_path),
-        '-vf', crop_filter,
-        '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
-        '-movflags', '+faststart',
-        '-an',
-        str(output_path),
-    ]
+        frame_count = 0
+        for frame in input_container.decode(video=0):
+            frame_num = frame_count
+            frame_count += 1
 
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-    if proc.returncode != 0:
-        logger.warning('ffmpeg crop with expressions failed, trying fallback: %s', proc.stderr[-200:])
-        avg_x = int(sum(kf['x'] for kf in keyframes) / len(keyframes) / 100 * vid_w)
-        avg_y = int(sum(kf['y'] for kf in keyframes) / len(keyframes) / 100 * vid_h)
-        avg_x = max(0, min(avg_x, vid_w - out_w))
-        avg_y = max(0, min(avg_y, vid_h - out_h))
+            if frame_num < start_frame:
+                continue
+            if frame_num > end_frame:
+                break
 
-        cmd_fallback = [
-            'ffmpeg', '-y',
-            '-ss', f'{t_start:.4f}',
-            '-to', f'{t_end:.4f}',
-            '-i', str(video_path),
-            '-vf', f'crop={out_w}:{out_h}:{avg_x}:{avg_y}',
-            '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
-            '-movflags', '+faststart',
-            '-an',
-            str(output_path),
-        ]
-        proc2 = subprocess.run(cmd_fallback, capture_output=True, text=True, timeout=300)
-        if proc2.returncode != 0:
-            logger.error('Video crop fallback also failed: %s', proc2.stderr[-200:])
-            return False
-    return True
+            # Get interpolated bbox for this frame
+            bbox = _interpolate_bbox(keyframes, frame_num)
+            if bbox is None:
+                continue
+
+            # Convert percentage to pixel coordinates
+            px = max(0, int(bbox['x'] / 100 * vid_w))
+            py = max(0, int(bbox['y'] / 100 * vid_h))
+
+            # Clamp to video bounds
+            px = min(px, vid_w - out_w)
+            py = min(py, vid_h - out_h)
+            px = max(0, px)
+            py = max(0, py)
+
+            # Convert frame to numpy, crop, and encode
+            img = frame.to_ndarray(format='rgb24')
+            cropped = img[py:py + out_h, px:px + out_w]
+
+            # Handle edge cases where crop region exceeds image
+            if cropped.shape[0] != out_h or cropped.shape[1] != out_w:
+                padded = np.zeros((out_h, out_w, 3), dtype=np.uint8)
+                h = min(cropped.shape[0], out_h)
+                w = min(cropped.shape[1], out_w)
+                padded[:h, :w] = cropped[:h, :w]
+                cropped = padded
+
+            out_frame = av.VideoFrame.from_ndarray(cropped, format='rgb24')
+            for packet in out_stream.encode(out_frame):
+                output_container.mux(packet)
+
+        # Flush encoder
+        for packet in out_stream.encode():
+            output_container.mux(packet)
+
+        output_container.close()
+        input_container.close()
+        return True
+
+    except Exception:
+        logger.exception('Failed to crop video')
+        return False
 
 
 def _convert_track_to_keyframes(track, vid_w, vid_h, fps):
@@ -171,8 +178,6 @@ def _convert_track_to_keyframes(track, vid_w, vid_h, fps):
 
 
 def _export_video_crop(dst_file, temp_dir, instance_data, **options):
-    import json
-
     db_data = instance_data._db_data
 
     if not hasattr(db_data, 'video'):
@@ -187,8 +192,8 @@ def _export_video_crop(dst_file, temp_dir, instance_data, **options):
         return
 
     try:
-        vid_w, vid_h, fps = _get_video_info(video_path)
-    except ValueError as e:
+        vid_w, vid_h, fps, _ = _get_video_info(video_path)
+    except Exception as e:
         logger.warning('Video crop export: failed to probe video: %s', e)
         make_zip_archive(temp_dir, dst_file)
         return
