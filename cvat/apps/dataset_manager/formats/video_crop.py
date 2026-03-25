@@ -208,7 +208,7 @@ def _export_video_crop(dst_file, temp_dir, instance_data, **options):
 
         vid_w, vid_h, fps, total = _get_video_info(video_path)
         debug_info['video_info'] = {
-            'width': vid_w, 'height': vid_h, 'fps': fps, 'total_frames': total,
+            'width': vid_w, 'height': vid_h, 'fps': float(fps), 'total_frames': total,
         }
 
         # Collect tracks
